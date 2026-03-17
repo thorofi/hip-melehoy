@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Hip Drop Detector – RUNHOOD</title>
+  <title>Hip Melehoy Detector – by RUNHOOD</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
@@ -586,6 +586,820 @@
       document.getElementById('btn-start').textContent = '⚠️ Sensor Tidak Didukung';
       document.getElementById('btn-start').style.opacity = '0.5';
       document.getElementById('btn-start').disabled = true;
+    }
+  });
+</script>
+</body>
+</html>
+What's included in this single file:
+
+Phase 1 – Calibration (10s): reads gamma baseline with live display, animated SVG ring, per-second beep + haptic
+Phase 2 – Running (10s): tracks deviation from baseline in real-time, shows live max deviation
+Results: color-coded badge (green/yellow/red), per-second bar chart, avg/max/baseline stats, share button
+iOS 13+ permission: DeviceOrientationEvent.requestPermission() called on button tap (required for Safari)
+Audio: Web Audio API chimes on start/end, soft beeps each second
+Vibration: navigator.vibrate() patterns at key moments
+No build step — just open the file in a mobile browser or serve it over HTTPS (required for sensor access on Android too)
+- Make it position must horizontal, since running belt mostly only can insert phone horizontally
+- Make the instruction to lift one leg, not running
+- Make history locally (if possible) and menu that can see the history (if user want to try left and right leg)
+Here's the fully updated index.html with all three changes — horizontal layout, single-leg lift test, and local history with comparison:
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Hip Drop Detector – RUNHOOD</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    body { background: #0f0f0f; font-family: 'Segoe UI', system-ui, sans-serif; overscroll-behavior: none; margin: 0; }
+
+    /* ── Rotate overlay ── */
+    #rotate-overlay {
+      display: none; position: fixed; inset: 0; z-index: 9999;
+      background: #0f0f0f; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center; padding: 2rem;
+    }
+    @keyframes rotate-anim {
+      0%,30% { transform: rotate(0deg); }
+      60%,100% { transform: rotate(90deg); }
+    }
+    .rotate-icon { font-size: 64px; animation: rotate-anim 2.4s ease-in-out infinite; display: inline-block; }
+
+    /* ── Animations ── */
+    @keyframes pulse-ring {
+      0% { transform: scale(0.9); opacity: 1; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+    @keyframes fade-in { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes slide-up { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+    .pulse-ring::before {
+      content:''; position:absolute; inset:-12px; border-radius:50%;
+      border:3px solid #E11E02; animation:pulse-ring 1.4s ease-out infinite;
+    }
+    .pulse-ring::after {
+      content:''; position:absolute; inset:-24px; border-radius:50%;
+      border:2px solid #E11E02; animation:pulse-ring 1.4s ease-out 0.5s infinite;
+    }
+    .fade-in { animation: fade-in 0.5s ease forwards; }
+    .slide-up { animation: slide-up 0.4s ease forwards; }
+
+    .gradient-text {
+      background: linear-gradient(135deg, #E11E02, #ff6b4a);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .card { background: linear-gradient(145deg,#1a1a1a,#111); border:1px solid #2a2a2a; border-radius:20px; }
+    .btn-primary {
+      background: linear-gradient(135deg, #E11E02, #c41a02);
+      box-shadow: 0 4px 24px rgba(225,30,2,0.4); transition: all 0.2s ease;
+    }
+    .btn-primary:active { transform: scale(0.96); box-shadow: 0 2px 12px rgba(225,30,2,0.3); }
+    .screen { display: none; }
+    .screen.active { display: flex; }
+
+    /* Landscape measurement screens use row layout */
+    .ls-screen {
+      flex-direction: row !important;
+      align-items: center; justify-content: center;
+      padding: 1.25rem 2rem; gap: 2rem; min-height: 100svh;
+    }
+
+    .scrollable { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+    .hist-item { animation: slide-up 0.3s ease both; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+<!-- ══════════════════════ ROTATE OVERLAY ══════════════════════ -->
+<div id="rotate-overlay">
+  <span class="rotate-icon">📱</span>
+  <h3 class="text-white font-black text-xl mt-4 mb-2">Putar Ponselmu</h3>
+  <p class="text-gray-400 text-sm leading-relaxed max-w-xs">
+    Putar ke mode <strong class="text-white">landscape (horizontal)</strong>,<br/>
+    lalu masukkan ke running belt di pinggang.
+  </p>
+  <div class="mt-6 rounded-2xl px-5 py-3" style="background:rgba(225,30,2,0.1);border:1px solid rgba(225,30,2,0.3);">
+    <p class="text-gray-300 text-xs">Pengukuran akan mulai otomatis saat horizontal ✅</p>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: HOME ══════════════════════ -->
+<div id="screen-home" class="screen active flex-col min-h-screen"
+     style="background:linear-gradient(180deg,#1a0000 0%,#0f0f0f 45%);">
+
+  <!-- Header -->
+  <div class="flex items-start justify-between px-5 pt-9">
+    <div>
+      <h1 class="text-white font-black tracking-tight leading-none mb-1" style="font-size:38px;letter-spacing:-1px;">
+        Hip Drop<br/><span class="gradient-text">Detector</span>
+      </h1>
+      <img src="https://i.imgur.com/jtKUrv6.png" alt="RUNHOOD" style="height:36px;object-fit:contain;margin-top:6px;" onerror="this.style.display='none'" />
+    </div>
+    <button onclick="showHistoryScreen()" class="flex items-center gap-2 rounded-2xl px-3 py-2 text-gray-400 text-sm font-semibold mt-1" style="background:#1a1a1a;border:1px solid #2a2a2a;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      Riwayat
+    </button>
+  </div>
+
+  <div class="flex-1 flex flex-col justify-between px-5 pb-10 mt-5">
+
+    <!-- Steps card -->
+    <div class="card p-5 mb-4 fade-in">
+      <p class="text-white font-semibold text-sm mb-3">Cara Penggunaan</p>
+      <div class="grid grid-cols-4 gap-2">
+        <div class="rounded-xl p-2 text-center" style="background:#111;border:1px solid #222;">
+          <div class="text-2xl mb-1">🦵</div>
+          <p class="text-gray-400" style="font-size:10px;">Pilih<br/><span class="text-white font-semibold">Kaki</span></p>
+        </div>
+        <div class="rounded-xl p-2 text-center" style="background:#111;border:1px solid #222;">
+          <div class="text-2xl mb-1">📱</div>
+          <p class="text-gray-400" style="font-size:10px;">Pasang<br/><span class="text-white font-semibold">Horizontal</span></p>
+        </div>
+        <div class="rounded-xl p-2 text-center" style="background:#111;border:1px solid #222;">
+          <div class="text-2xl mb-1">📐</div>
+          <p class="text-gray-400" style="font-size:10px;">Kalibrasi<br/><span class="text-white font-semibold">10 det</span></p>
+        </div>
+        <div class="rounded-xl p-2 text-center" style="background:#111;border:1px solid #222;">
+          <div class="text-2xl mb-1">🧍</div>
+          <p class="text-gray-400" style="font-size:10px;">Angkat<br/><span class="text-white font-semibold">10 det</span></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Belt tip -->
+    <div class="rounded-2xl p-4 mb-4 flex items-center gap-3" style="background:rgba(225,30,2,0.08);border:1px solid rgba(225,30,2,0.2);">
+      <div class="text-2xl">💡</div>
+      <p class="text-gray-300 text-xs leading-relaxed">Pasang ponsel <strong class="text-white">horizontal</strong> di running belt bagian <strong class="text-white">tengah pinggang</strong>. Layar menghadap keluar.</p>
+    </div>
+
+    <!-- iOS notice -->
+    <div id="ios-notice" class="hidden rounded-2xl p-4 mb-4" style="background:rgba(255,190,0,0.08);border:1px solid rgba(255,190,0,0.25);">
+      <p class="text-yellow-300 text-xs text-center leading-relaxed">⚠️ iPhone/iPad terdeteksi. Izin sensor gerak akan diminta saat tombol ditekan.</p>
+    </div>
+
+    <button id="btn-start" onclick="requestAndStart()" class="btn-primary w-full text-white font-bold py-4 rounded-2xl text-base tracking-wide">
+      Mulai Deteksi
+    </button>
+    <p class="text-gray-600 text-xs text-center mt-3">Sensor gyroscope diperlukan · Butuh HTTPS</p>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: LEG SELECT ══════════════════════ -->
+<div id="screen-leg-select" class="screen flex-col min-h-screen"
+     style="background:linear-gradient(180deg,#1a0000 0%,#0f0f0f 50%);">
+  <div class="flex flex-col px-5 pt-9 pb-10 w-full flex-1">
+
+    <button onclick="goTo('home')" class="self-start flex items-center gap-2 text-gray-400 text-sm mb-7">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5m7-7-7 7 7 7"/></svg>
+      Kembali
+    </button>
+
+    <h2 class="text-white text-2xl font-black mb-1">Pilih Kaki</h2>
+    <p class="text-gray-400 text-sm mb-2">Kaki mana yang ingin diuji?</p>
+    <p class="text-gray-500 text-xs leading-relaxed mb-7 max-w-xs">
+      Kamu akan <strong class="text-gray-300">berdiri pada kaki yang dipilih</strong> dan mengangkat kaki lainnya selama 10 detik.
+    </p>
+
+    <div class="flex flex-col gap-4 flex-1">
+      <!-- Left leg -->
+      <button onclick="selectLeg('left')" class="w-full rounded-3xl p-5 flex items-center gap-4 text-left active:scale-95 transition-transform"
+              style="background:linear-gradient(135deg,#1a1a30,#111);border:2px solid #2a2a50;">
+        <span style="font-size:44px;">🦵</span>
+        <div class="flex-1">
+          <p class="text-white font-black text-lg">Kaki Kiri</p>
+          <p class="text-gray-400 text-xs mt-0.5">Berdiri kaki kiri · Angkat kaki kanan</p>
+        </div>
+        <span class="rounded-full w-8 h-8 flex items-center justify-center text-white font-black text-sm flex-shrink-0"
+              style="background:rgba(100,100,255,0.2);border:1px solid rgba(100,100,255,0.4);">L</span>
+      </button>
+
+      <!-- Right leg -->
+      <button onclick="selectLeg('right')" class="w-full rounded-3xl p-5 flex items-center gap-4 text-left active:scale-95 transition-transform"
+              style="background:linear-gradient(135deg,#2e1a1a,#111);border:2px solid #501a1a;">
+        <span style="font-size:44px;transform:scaleX(-1);display:inline-block;">🦵</span>
+        <div class="flex-1">
+          <p class="text-white font-black text-lg">Kaki Kanan</p>
+          <p class="text-gray-400 text-xs mt-0.5">Berdiri kaki kanan · Angkat kaki kiri</p>
+        </div>
+        <span class="rounded-full w-8 h-8 flex items-center justify-center text-white font-black text-sm flex-shrink-0"
+              style="background:rgba(225,30,2,0.2);border:1px solid rgba(225,30,2,0.4);">R</span>
+      </button>
+    </div>
+
+    <div class="mt-6 rounded-2xl p-4" style="background:rgba(255,255,255,0.04);border:1px solid #222;">
+      <p class="text-gray-500 text-xs text-center">💾 Hasil tersimpan otomatis ke riwayat lokal perangkat ini</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: CALIBRATION (Landscape) ══════════════════════ -->
+<div id="screen-calibration" class="screen ls-screen"
+     style="background:linear-gradient(135deg,#1a0000 0%,#0f0f0f 100%);">
+
+  <!-- Countdown side -->
+  <div class="flex flex-col items-center flex-shrink-0">
+    <p class="text-gray-500 text-xs font-semibold uppercase tracking-widest mb-3">Fase 1 / 2 · Kalibrasi</p>
+    <div class="relative flex items-center justify-center" style="width:150px;height:150px;">
+      <svg width="150" height="150" style="position:absolute;top:0;left:0;transform:rotate(-90deg);">
+        <circle cx="75" cy="75" r="65" fill="none" stroke="#1a1a1a" stroke-width="7"/>
+        <circle id="cal-ring" cx="75" cy="75" r="65" fill="none" stroke="#E11E02" stroke-width="7"
+                stroke-linecap="round" stroke-dasharray="408" stroke-dashoffset="0"/>
+      </svg>
+      <div class="relative flex flex-col items-center justify-center pulse-ring"
+           style="width:96px;height:96px;border-radius:50%;background:radial-gradient(circle,#200000,#0f0f0f);">
+        <span id="cal-countdown" class="text-white font-black" style="font-size:40px;line-height:1;">10</span>
+        <span class="text-gray-500 text-xs">detik</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info side -->
+  <div class="flex flex-col justify-center gap-4" style="max-width:250px;">
+    <div>
+      <h2 class="text-white text-xl font-black mb-1">Berdiri Tegak Diam</h2>
+      <p class="text-gray-400 text-xs leading-relaxed">Dua kaki di lantai. Jangan bergerak! Sensor membaca posisi netral pinggang kamu.</p>
+    </div>
+
+    <div class="card px-4 py-3 text-center">
+      <p class="text-gray-500 text-xs mb-1">Gamma Sekarang</p>
+      <p id="cal-gamma" class="gradient-text font-black" style="font-size:30px;">0.0°</p>
+      <p class="text-gray-600 text-xs">Jaga agar angka stabil</p>
+    </div>
+
+    <div class="rounded-xl px-3 py-2" style="background:rgba(225,30,2,0.08);border:1px solid rgba(225,30,2,0.2);">
+      <p class="text-gray-400 text-xs text-center">🎵 Bip tiap detik · 📳 Getar saat mulai & selesai</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: LIFTING (Landscape) ══════════════════════ -->
+<div id="screen-lifting" class="screen ls-screen"
+     style="background:linear-gradient(135deg,#001500 0%,#0f0f0f 100%);">
+
+  <!-- Countdown side -->
+  <div class="flex flex-col items-center flex-shrink-0">
+    <p class="text-gray-500 text-xs font-semibold uppercase tracking-widest mb-3">Fase 2 / 2 · Angkat Kaki</p>
+    <div class="relative flex items-center justify-center" style="width:150px;height:150px;">
+      <svg width="150" height="150" style="position:absolute;top:0;left:0;transform:rotate(-90deg);">
+        <circle cx="75" cy="75" r="65" fill="none" stroke="#1a1a1a" stroke-width="7"/>
+        <circle id="run-ring" cx="75" cy="75" r="65" fill="none" stroke="#22c55e" stroke-width="7"
+                stroke-linecap="round" stroke-dasharray="408" stroke-dashoffset="0"/>
+      </svg>
+      <div class="relative flex flex-col items-center justify-center"
+           style="width:96px;height:96px;border-radius:50%;background:radial-gradient(circle,#001505,#0f0f0f);">
+        <span id="run-countdown" class="text-white font-black" style="font-size:40px;line-height:1;">10</span>
+        <span class="text-gray-500 text-xs">detik</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Info side -->
+  <div class="flex flex-col justify-center gap-3" style="max-width:250px;">
+    <div>
+      <h2 id="lift-title" class="text-white text-xl font-black mb-1">Angkat Kaki!</h2>
+      <p id="lift-desc" class="text-gray-400 text-xs leading-relaxed">Angkat kaki dan tahan selama 10 detik.</p>
+    </div>
+
+    <div class="card px-4 py-3">
+      <div class="flex gap-3 mb-2">
+        <div class="text-center flex-1">
+          <p class="text-gray-500 text-xs mb-1">Gamma</p>
+          <p id="run-gamma" class="text-white font-black" style="font-size:22px;">0.0°</p>
+        </div>
+        <div class="self-stretch w-px bg-gray-800 mx-1"></div>
+        <div class="text-center flex-1">
+          <p class="text-gray-500 text-xs mb-1">Deviasi Maks</p>
+          <p id="run-max" class="font-black" style="font-size:22px;color:#22c55e;">0.0°</p>
+        </div>
+      </div>
+      <div class="rounded-lg px-3 py-1.5" style="background:#111;">
+        <p class="text-gray-500 text-xs text-center">Baseline: <span id="run-baseline" class="text-gray-300 font-semibold">0.0°</span></p>
+      </div>
+    </div>
+
+    <div class="rounded-xl px-3 py-2" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);">
+      <p class="text-gray-400 text-xs text-center">🎵 Bip tiap detik · 🔔 Bunyi selesai</p>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: RESULT ══════════════════════ -->
+<div id="screen-result" class="screen flex-col min-h-screen scrollable" style="background:#0f0f0f;">
+  <div class="flex flex-col items-center px-5 pt-8 pb-10 w-full max-w-sm mx-auto">
+
+    <p class="text-gray-500 text-xs font-semibold uppercase tracking-widest mb-1">Hasil Analisis</p>
+    <h2 class="text-white text-2xl font-black mb-1 text-center">Hip Drop Kamu</h2>
+    <p id="result-leg-label" class="text-gray-500 text-xs mb-5">🦵 Kaki Kiri</p>
+
+    <!-- Badge -->
+    <div id="result-badge" class="w-full rounded-3xl p-6 mb-4 text-center" style="border:2px solid #333;">
+      <div id="result-emoji" class="text-5xl mb-2">✅</div>
+      <p id="result-label" class="font-black text-xl mb-1 text-white">Normal</p>
+      <p id="result-desc" class="text-gray-400 text-sm leading-relaxed">Hipmu syantik, pertahankan!</p>
+    </div>
+
+    <!-- Stats + bar chart -->
+    <div class="card w-full p-5 mb-4">
+      <div class="grid grid-cols-3 gap-3 mb-4">
+        <div class="text-center">
+          <p class="text-gray-500 text-xs mb-1">Rata-rata</p>
+          <p id="stat-avg" class="text-white font-black text-lg">—</p>
+        </div>
+        <div class="text-center border-x border-gray-800">
+          <p class="text-gray-500 text-xs mb-1">Maksimal</p>
+          <p id="stat-max" class="text-white font-black text-lg">—</p>
+        </div>
+        <div class="text-center">
+          <p class="text-gray-500 text-xs mb-1">Baseline</p>
+          <p id="stat-base" class="text-white font-black text-lg">—</p>
+        </div>
+      </div>
+      <p class="text-gray-500 text-xs mb-2">Deviasi Per Detik</p>
+      <div id="bar-chart" class="flex items-end gap-1 justify-between" style="height:56px;"></div>
+      <div class="flex justify-between mt-1">
+        <span class="text-gray-600 text-xs">0s</span>
+        <span class="text-gray-600 text-xs">10s</span>
+      </div>
+    </div>
+
+    <!-- Scale guide -->
+    <div class="card w-full p-4 mb-5">
+      <p class="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-3">Skala Diagnosis</p>
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center gap-3">
+          <div class="w-3 h-3 rounded-full flex-shrink-0" style="background:#22c55e;"></div>
+          <p class="text-gray-400 text-xs"><strong class="text-gray-200">Normal</strong> — deviasi &lt; 5°</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="w-3 h-3 rounded-full flex-shrink-0" style="background:#f59e0b;"></div>
+          <p class="text-gray-400 text-xs"><strong class="text-gray-200">Ringan</strong> — deviasi 5° – 10°</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="w-3 h-3 rounded-full flex-shrink-0" style="background:#E11E02;"></div>
+          <p class="text-gray-400 text-xs"><strong class="text-gray-200">Berat</strong> — deviasi &gt; 10°</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action buttons -->
+    <button onclick="testOtherLeg()" class="w-full text-white font-bold py-4 rounded-2xl text-sm mb-3"
+            style="background:linear-gradient(135deg,#1a3020,#111);border:1px solid #2a4a30;">
+      🔄 Uji Kaki <span id="btn-other-leg-label">Kanan</span>
+    </button>
+    <button onclick="restart()" class="btn-primary w-full text-white font-bold py-4 rounded-2xl text-base mb-3">
+      🔁 Ulangi Kaki Ini
+    </button>
+    <button onclick="showHistoryScreen()" class="w-full text-gray-300 font-semibold py-3 rounded-2xl text-sm mb-2"
+            style="background:#1a1a1a;border:1px solid #2a2a2a;">
+      📋 Lihat Riwayat
+    </button>
+    <button onclick="shareResult()" class="w-full text-gray-500 font-semibold py-3 rounded-2xl text-sm"
+            style="background:#111;border:1px solid #1d1d1d;">
+      📤 Bagikan Hasil
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: HISTORY ══════════════════════ -->
+<div id="screen-history" class="screen flex-col min-h-screen scrollable" style="background:#0f0f0f;">
+  <div class="flex flex-col w-full max-w-sm mx-auto px-5 pt-8 pb-12">
+
+    <!-- Title row -->
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h2 class="text-white text-2xl font-black">Riwayat</h2>
+        <p class="text-gray-500 text-xs mt-0.5">Tersimpan lokal di perangkat ini</p>
+      </div>
+      <button onclick="goTo('home')" class="flex items-center gap-2 text-gray-400 text-sm px-3 py-2 rounded-xl" style="background:#1a1a1a;border:1px solid #2a2a2a;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </button>
+    </div>
+
+    <!-- Comparison panel (shown when both legs have data) -->
+    <div id="compare-panel" class="hidden card p-4 mb-5">
+      <p class="text-gray-400 text-xs font-semibold uppercase tracking-wider mb-3">⚖️ Perbandingan Terbaru</p>
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div class="rounded-xl p-3 text-center" style="background:#111;border:1px solid #222;">
+          <p class="text-gray-500 text-xs mb-1">🦵 Kaki Kiri</p>
+          <p id="cmp-left-avg" class="text-white font-black text-base">—</p>
+          <p id="cmp-left-label" class="text-xs mt-0.5 font-semibold">—</p>
+        </div>
+        <div class="rounded-xl p-3 text-center" style="background:#111;border:1px solid #222;">
+          <p class="text-gray-500 text-xs mb-1" style="transform:scaleX(-1);display:inline-block;">🦵</p><span class="text-gray-500 text-xs"> Kaki Kanan</span>
+          <p id="cmp-right-avg" class="text-white font-black text-base">—</p>
+          <p id="cmp-right-label" class="text-xs mt-0.5 font-semibold">—</p>
+        </div>
+      </div>
+      <p id="cmp-conclusion" class="text-gray-400 text-xs text-center leading-relaxed px-2"></p>
+    </div>
+
+    <!-- List -->
+    <div id="history-list" class="flex flex-col gap-3"></div>
+
+    <!-- Empty state -->
+    <div id="history-empty" class="hidden flex-col items-center justify-center py-16 text-center">
+      <div class="text-5xl mb-4">📋</div>
+      <p class="text-gray-400 font-semibold mb-1">Belum Ada Riwayat</p>
+      <p class="text-gray-600 text-xs">Lakukan deteksi pertamamu!</p>
+      <button onclick="goTo('home')" class="btn-primary mt-6 text-white font-bold py-3 px-8 rounded-2xl text-sm">
+        Mulai Sekarang
+      </button>
+    </div>
+
+    <!-- Clear all -->
+    <button id="btn-clear" onclick="confirmClear()" class="hidden mt-6 w-full text-red-400 font-semibold py-3 rounded-2xl text-sm"
+            style="background:rgba(225,30,2,0.08);border:1px solid rgba(225,30,2,0.25);">
+      🗑️ Hapus Semua Riwayat
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: ERROR ══════════════════════ -->
+<div id="screen-error" class="screen flex-col min-h-screen items-center justify-center px-6 pb-10" style="background:#0f0f0f;">
+  <div class="card p-8 text-center max-w-sm w-full">
+    <div class="text-5xl mb-4">⚠️</div>
+    <h3 class="text-white font-black text-xl mb-3">Sensor Tidak Tersedia</h3>
+    <p id="error-msg" class="text-gray-400 text-sm leading-relaxed mb-6">Perangkat ini tidak mendukung sensor orientasi, atau izin ditolak.</p>
+    <button onclick="restart()" class="btn-primary w-full text-white font-bold py-4 rounded-2xl text-sm">Coba Lagi</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ JAVASCRIPT ══════════════════════ -->
+<script>
+  // ── State ──────────────────────────────────────────────────────
+  let audioCtx = null;
+  let currentGamma = 0;
+  let baselineGamma = 0;
+  let calReadings = [];
+  let selectedLeg = 'left';
+  let phaseTimer = null;
+  let orientationHandler = null;
+  let ringAnimId = null;
+  let lastResult = null;
+
+  const CIRCUMFERENCE = 408; // 2 * π * 65
+
+  // ── localStorage history ────────────────────────────────────────
+  const HIST_KEY = 'hipDropHistory_v2';
+
+  function loadHistory() {
+    try { return JSON.parse(localStorage.getItem(HIST_KEY)) || []; } catch { return []; }
+  }
+  function saveEntry(entry) {
+    const h = loadHistory();
+    h.unshift(entry);
+    if (h.length > 100) h.length = 100;
+    localStorage.setItem(HIST_KEY, JSON.stringify(h));
+  }
+  function deleteEntry(id) {
+    const h = loadHistory().filter(e => e.id !== id);
+    localStorage.setItem(HIST_KEY, JSON.stringify(h));
+    renderHistory();
+  }
+  function confirmClear() {
+    if (confirm('Hapus semua riwayat? Tidak bisa dikembalikan.')) {
+      localStorage.removeItem(HIST_KEY);
+      renderHistory();
+    }
+  }
+
+  // ── Screen management ───────────────────────────────────────────
+  function goTo(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById('screen-' + id).classList.add('active');
+    setPhaseMode(['calibration','lifting'].includes(id));
+  }
+
+  function showHistoryScreen() {
+    goTo('history');
+    renderHistory();
+  }
+
+  // ── Landscape / rotate overlay ──────────────────────────────────
+  let inPhase = false;
+
+  function setPhaseMode(active) {
+    inPhase = active;
+    checkOrientation();
+  }
+
+  function checkOrientation() {
+    const portrait = window.innerHeight > window.innerWidth;
+    const overlay = document.getElementById('rotate-overlay');
+    overlay.style.display = (inPhase && portrait) ? 'flex' : 'none';
+  }
+
+  window.addEventListener('resize', checkOrientation);
+  window.addEventListener('orientationchange', () => setTimeout(checkOrientation, 300));
+
+  // ── Audio ───────────────────────────────────────────────────────
+  function getAC() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+  function beep(freq = 880, dur = 0.08, vol = 0.4) {
+    try {
+      const ac = getAC();
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.connect(g); g.connect(ac.destination);
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol, ac.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+      o.start(); o.stop(ac.currentTime + dur);
+    } catch(e) {}
+  }
+  function chimeStart() { beep(523,.12,.4); setTimeout(()=>beep(659,.12,.4),130); setTimeout(()=>beep(784,.18,.5),260); }
+  function chimeEnd()   { beep(784,.12,.5); setTimeout(()=>beep(659,.10,.4),130); setTimeout(()=>beep(523,.20,.5),250); setTimeout(()=>beep(392,.30,.4),400); }
+  function vib(p) { try { navigator.vibrate(p); } catch(e) {} }
+
+  // ── iOS permission ──────────────────────────────────────────────
+  function isIOS() {
+    return /iP(hone|ad|od)/i.test(navigator.userAgent) ||
+           (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+  if (isIOS()) document.getElementById('ios-notice').classList.remove('hidden');
+
+  async function requestAndStart() {
+    try { getAC().resume(); } catch(e) {}
+    if (isIOS() && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const r = await DeviceOrientationEvent.requestPermission();
+        if (r !== 'granted') { showErr('Izin sensor ditolak. Buka <strong>Pengaturan › Safari › Sensor & Gerakan</strong> lalu aktifkan.'); return; }
+      } catch(e) { showErr('Gagal meminta izin: ' + e.message); return; }
+    }
+    goTo('leg-select');
+  }
+
+  // ── Leg selection ───────────────────────────────────────────────
+  function selectLeg(leg) {
+    selectedLeg = leg;
+    const isLeft = leg === 'left';
+    document.getElementById('lift-title').textContent = isLeft ? 'Angkat Kaki Kanan!' : 'Angkat Kaki Kiri!';
+    document.getElementById('lift-desc').textContent = isLeft
+      ? 'Berdiri stabil di kaki KIRI. Angkat kaki kanan setinggi lutut dan tahan!'
+      : 'Berdiri stabil di kaki KANAN. Angkat kaki kiri setinggi lutut dan tahan!';
+    document.getElementById('btn-other-leg-label').textContent = isLeft ? 'Kanan' : 'Kiri';
+    startCalibration();
+  }
+
+  function testOtherLeg() {
+    selectLeg(selectedLeg === 'left' ? 'right' : 'left');
+  }
+
+  // ── Orientation sensor ──────────────────────────────────────────
+  function attachOrientation(cb) {
+    if (orientationHandler) window.removeEventListener('deviceorientation', orientationHandler);
+    orientationHandler = e => cb(e);
+    window.addEventListener('deviceorientation', orientationHandler, true);
+  }
+  function detachOrientation() {
+    if (orientationHandler) { window.removeEventListener('deviceorientation', orientationHandler); orientationHandler = null; }
+  }
+
+  // ── SVG ring animation ──────────────────────────────────────────
+  function animRing(ringId, ms) {
+    const ring = document.getElementById(ringId);
+    if (!ring) return;
+    ring.style.strokeDashoffset = '0';
+    const t0 = performance.now();
+    function frame(now) {
+      const p = Math.min((now - t0) / ms, 1);
+      ring.style.strokeDashoffset = (CIRCUMFERENCE * p).toFixed(1);
+      if (p < 1) ringAnimId = requestAnimationFrame(frame);
+    }
+    if (ringAnimId) cancelAnimationFrame(ringAnimId);
+    ringAnimId = requestAnimationFrame(frame);
+  }
+
+  // ── Phase 1: Calibration ────────────────────────────────────────
+  function startCalibration() {
+    calReadings = [];
+    document.getElementById('cal-countdown').textContent = '10';
+    document.getElementById('cal-ring').style.strokeDashoffset = '0';
+    goTo('calibration');
+    vib([200,100,200]);
+    chimeStart();
+
+    attachOrientation(e => {
+      const g = e.gamma ?? 0;
+      currentGamma = g;
+      document.getElementById('cal-gamma').textContent = g.toFixed(1) + '°';
+      calReadings.push(g);
+    });
+
+    animRing('cal-ring', 10000);
+    let n = 0;
+    phaseTimer = setInterval(() => {
+      n++;
+      document.getElementById('cal-countdown').textContent = 10 - n;
+      beep(660, .07, .3); vib(30);
+      if (n >= 10) { clearInterval(phaseTimer); finishCal(); }
+    }, 1000);
+  }
+
+  function finishCal() {
+    detachOrientation();
+    if (!calReadings.length) { showErr('Tidak ada data sensor. Pastikan gyroscope tersedia.'); return; }
+    baselineGamma = calReadings.reduce((a,b) => a+b, 0) / calReadings.length;
+    vib([100,80,100,80,300]); chimeEnd();
+    setTimeout(startLifting, 1200);
+  }
+
+  // ── Phase 2: Lifting ────────────────────────────────────────────
+  function startLifting() {
+    document.getElementById('run-countdown').textContent = '10';
+    document.getElementById('run-ring').style.strokeDashoffset = '0';
+    document.getElementById('run-baseline').textContent = baselineGamma.toFixed(1) + '°';
+    goTo('lifting');
+    vib([300,100,300]); chimeStart();
+
+    let maxDev = 0;
+    const secDevs = [];
+
+    attachOrientation(e => {
+      const g = e.gamma ?? 0;
+      currentGamma = g;
+      const dev = Math.abs(g - baselineGamma);
+      if (dev > maxDev) maxDev = dev;
+      document.getElementById('run-gamma').textContent = g.toFixed(1) + '°';
+      document.getElementById('run-max').textContent = maxDev.toFixed(1) + '°';
+    });
+
+    animRing('run-ring', 10000);
+    let n = 0;
+    phaseTimer = setInterval(() => {
+      n++;
+      document.getElementById('run-countdown').textContent = 10 - n;
+      beep(880, .07, .3); vib(30);
+      secDevs.push(Math.abs(currentGamma - baselineGamma));
+      if (n >= 10) { clearInterval(phaseTimer); finishLifting(secDevs, maxDev); }
+    }, 1000);
+  }
+
+  function finishLifting(secDevs, maxDev) {
+    detachOrientation();
+    vib([200,100,200,100,500]); chimeEnd();
+    setTimeout(() => showResult(secDevs, maxDev), 800);
+  }
+
+  // ── Result ──────────────────────────────────────────────────────
+  function labelFor(avg) {
+    if (avg < 5) return { label:'Normal', emoji:'✅', color:'#22c55e', bg:'rgba(34,197,94,0.1)', desc:'Pinggulmu stabil saat menahan satu kaki. Kontrol panggul sangat baik!' };
+    if (avg < 10) return { label:'Hip Melehoy Ringan', emoji:'⚠️', color:'#f59e0b', bg:'rgba(245,158,11,0.1)', desc:'Terdeteksi kemiringan panggul ringan. Latihan glute & core disarankan.' };
+    return { label:'Hip Melehoy Berat', emoji:'🔴', color:'#E11E02', bg:'rgba(225,30,2,0.1)', desc:'Kemiringan panggul signifikan. Konsultasikan dengan fisioterapis.' };
+  }
+
+  function showResult(secDevs, maxDev) {
+    const avg = secDevs.reduce((a,b) => a+b, 0) / secDevs.length;
+    const { label, emoji, color, bg, desc } = labelFor(avg);
+    const legStr = selectedLeg === 'left' ? 'Kaki Kiri' : 'Kaki Kanan';
+
+    document.getElementById('result-leg-label').textContent = '🦵 Pengujian ' + legStr;
+    document.getElementById('result-badge').style.cssText += `;background:${bg};border-color:${color};`;
+    document.getElementById('result-emoji').textContent = emoji;
+    document.getElementById('result-label').textContent = label;
+    document.getElementById('result-desc').textContent = desc;
+    document.getElementById('stat-avg').textContent = avg.toFixed(1) + '°';
+    document.getElementById('stat-max').textContent = maxDev.toFixed(1) + '°';
+    document.getElementById('stat-base').textContent = baselineGamma.toFixed(1) + '°';
+
+    // Bar chart
+    const chart = document.getElementById('bar-chart');
+    chart.innerHTML = '';
+    const maxV = Math.max(...secDevs, 1);
+    secDevs.forEach(d => {
+      const bar = document.createElement('div');
+      bar.style.cssText = `flex:1;height:${Math.max((d/maxV)*100,4)}%;border-radius:4px 4px 0 0;background:${color};opacity:0.85;position:relative;`;
+      const tip = document.createElement('div');
+      tip.style.cssText = 'position:absolute;top:-16px;left:50%;transform:translateX(-50%);font-size:9px;color:#9ca3af;white-space:nowrap;';
+      tip.textContent = d.toFixed(1);
+      bar.appendChild(tip);
+      chart.appendChild(bar);
+    });
+
+    // Save
+    lastResult = { id: Date.now(), date: new Date().toISOString(), leg: selectedLeg, avg: +avg.toFixed(2), max: +maxDev.toFixed(2), baseline: +baselineGamma.toFixed(2), label, perSecond: secDevs.map(d => +d.toFixed(2)) };
+    saveEntry(lastResult);
+
+    goTo('result');
+  }
+
+  // ── History rendering ───────────────────────────────────────────
+  function renderHistory() {
+    const history = loadHistory();
+    const list = document.getElementById('history-list');
+    const empty = document.getElementById('history-empty');
+    const clearBtn = document.getElementById('btn-clear');
+    const cmpPanel = document.getElementById('compare-panel');
+
+    list.innerHTML = '';
+
+    if (!history.length) {
+      empty.classList.remove('hidden'); empty.style.display = 'flex';
+      clearBtn.classList.add('hidden'); cmpPanel.classList.add('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+    clearBtn.classList.remove('hidden');
+
+    // Comparison panel
+    const leftR = history.find(h => h.leg === 'left');
+    const rightR = history.find(h => h.leg === 'right');
+    if (leftR && rightR) {
+      cmpPanel.classList.remove('hidden');
+      const lc = labelFor(leftR.avg).color, rc = labelFor(rightR.avg).color;
+      document.getElementById('cmp-left-avg').textContent = leftR.avg.toFixed(1) + '°';
+      document.getElementById('cmp-left-label').textContent = leftR.label;
+      document.getElementById('cmp-left-label').style.color = lc;
+      document.getElementById('cmp-right-avg').textContent = rightR.avg.toFixed(1) + '°';
+      document.getElementById('cmp-right-label').textContent = rightR.label;
+      document.getElementById('cmp-right-label').style.color = rc;
+      const diff = Math.abs(leftR.avg - rightR.avg);
+      let conc;
+      if (diff < 2) conc = '✅ Kedua kaki seimbang.';
+      else if (leftR.avg > rightR.avg) conc = `⚠️ Kaki kiri ${diff.toFixed(1)}° lebih tinggi dari kaki kanan.`;
+      else conc = `⚠️ Kaki kanan ${diff.toFixed(1)}° lebih tinggi dari kaki kiri.`;
+      document.getElementById('cmp-conclusion').textContent = conc;
+    } else {
+      cmpPanel.classList.add('hidden');
+    }
+
+    // List items
+    history.forEach((e, i) => {
+      const d = new Date(e.date);
+      const dateStr = d.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric' });
+      const timeStr = d.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
+      const { color } = labelFor(e.avg);
+      const legStr = e.leg === 'left' ? 'Kaki Kiri' : 'Kaki Kanan';
+
+      const el = document.createElement('div');
+      el.className = 'card p-4 hist-item';
+      el.style.animationDelay = (i * 0.04) + 's';
+
+      // Mini sparkline
+      const sparkHtml = e.perSecond ? `
+        <div class="flex items-end gap-0.5 mt-3" style="height:28px;">
+          ${e.perSecond.map(v => {
+            const mx = Math.max(...e.perSecond, 1);
+            return `<div style="flex:1;height:${Math.max((v/mx)*100,4)}%;border-radius:2px 2px 0 0;background:${color};opacity:0.7;"></div>`;
+          }).join('')}
+        </div>` : '';
+
+      el.innerHTML = `
+        <div class="flex items-start justify-between mb-2">
+          <div>
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full" style="background:${color}20;border:1px solid ${color};color:${color};">${e.label}</span>
+              <span class="text-gray-500 text-xs">🦵 ${legStr}</span>
+            </div>
+            <p class="text-gray-600 text-xs">${dateStr} · ${timeStr}</p>
+          </div>
+          <button onclick="deleteEntry(${e.id})" class="text-gray-600 text-xs px-2 py-1 rounded-lg ml-2 flex-shrink-0" style="background:#111;border:1px solid #2a2a2a;">✕</button>
+        </div>
+        <div class="flex gap-5">
+          <div><p class="text-gray-500 text-xs">Rata-rata</p><p class="text-white font-black text-sm">${e.avg.toFixed(1)}°</p></div>
+          <div><p class="text-gray-500 text-xs">Maks</p><p class="text-white font-black text-sm">${e.max.toFixed(1)}°</p></div>
+          <div><p class="text-gray-500 text-xs">Baseline</p><p class="text-white font-black text-sm">${e.baseline.toFixed(1)}°</p></div>
+        </div>
+        ${sparkHtml}
+      `;
+      list.appendChild(el);
+    });
+  }
+
+  // ── Error / Restart ─────────────────────────────────────────────
+  function showErr(msg) {
+    detachOrientation(); clearInterval(phaseTimer); setPhaseMode(false);
+    document.getElementById('error-msg').innerHTML = msg;
+    goTo('error');
+  }
+  function restart() {
+    detachOrientation(); clearInterval(phaseTimer);
+    if (ringAnimId) cancelAnimationFrame(ringAnimId);
+    setPhaseMode(false); goTo('home');
+  }
+
+  // ── Share ───────────────────────────────────────────────────────
+  function shareResult() {
+    if (!lastResult) return;
+    const legStr = lastResult.leg === 'left' ? 'Kaki Kiri' : 'Kaki Kanan';
+    const txt = `🏃 Hip Drop Detector oleh RUNHOOD\nHasil (${legStr}): ${lastResult.label}\nRata-rata: ${lastResult.avg.toFixed(1)}° | Maks: ${lastResult.max.toFixed(1)}°\n\nDeteksi hip drop kamu bersama RUNHOOD!`;
+    if (navigator.share) navigator.share({ title:'Hip Drop Detector', text: txt }).catch(()=>{});
+    else navigator.clipboard.writeText(txt).then(()=>alert('Hasil disalin!')).catch(()=>alert(txt));
+  }
+
+  // ── Sensor availability ─────────────────────────────────────────
+  window.addEventListener('load', () => {
+    if (!window.DeviceOrientationEvent) {
+      const b = document.getElementById('btn-start');
+      b.textContent = '⚠️ Sensor Tidak Didukung';
+      b.style.opacity = '0.5';
+      b.disabled = true;
     }
   });
 </script>
